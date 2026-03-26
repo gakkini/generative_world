@@ -4,6 +4,18 @@ world:
   type: "cultivation"
   description: "一个仙魔并立的修真世界"
 
+# LLM配置
+llm:
+  enabled: false  # 设为true启用LLM
+  client_type: "minimax"  # minimax / openai / ollama / auto
+  model: "MiniMax-M2.7"  # 模型名称
+  api_key: ""  # 可选，使用环境变量更安全
+
+# 角色大脑配置
+agent_brains:
+  protagonist: "smart"   # 主角：使用完整Agent（LLM驱动）
+  npc: "simple"         # NPC：使用简单规则
+
 # 地点
 locations:
   - id: "canglange"
@@ -49,12 +61,13 @@ connections:
     to: "sanjie"
     days: 2
 
-# 角色（16个主角）
+# 角色（主角 = protagonist, npc = 简单NPC）
 characters:
+  # ===== 主角（使用智能大脑） =====
   - id: "p001"
     name: "李青云"
     sect: "canglange"
-    role: "protagonist"
+    role: "protagonist"  # 主角
     age: 18
     cultivation: "筑基中期"
     personality: "沉稳内敛，心怀天下"
@@ -97,13 +110,32 @@ characters:
     background: "炽焰谷少谷主"
     
   - id: "p006"
-    name: "周小 D"
+    name: "周小D"
     sect: "canglange"
     role: "protagonist"
     age: 18
     cultivation: "筑基初期"
     personality: "活泼开朗，贪吃好玩"
     background: "苍澜阁杂役弟子"
+
+  # ===== NPC（使用简单大脑） =====
+  - id: "n001"
+    name: "苍澜长老"
+    sect: "canglange"
+    role: "npc"
+    age: 150
+    cultivation: "元婴后期"
+    personality: "德高望重"
+    background: "苍澜阁太上长老"
+    
+  - id: "n002"
+    name: "青冥剑客"
+    sect: "qingming"
+    role: "npc"
+    age: 35
+    cultivation: "金丹中期"
+    personality: "剑痴"
+    background: "青冥宗剑堂弟子"
 
 # 初始位置
 initial_state:
@@ -115,3 +147,5 @@ initial_state:
     p004: "zixu"
     p005: "chiyan"
     p006: "canglange"
+    n001: "canglange"
+    n002: "qingming"
