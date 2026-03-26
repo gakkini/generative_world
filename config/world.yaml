@@ -1,0 +1,117 @@
+# 世界配置
+world:
+  name: "苍澜大陆"
+  type: "cultivation"
+  description: "一个仙魔并立的修真世界"
+
+# 地点
+locations:
+  - id: "canglange"
+    name: "苍澜阁"
+    type: "sect"
+    description: "正道领袖，门下弟子三千"
+    
+  - id: "qingming"
+    name: "青冥宗"
+    type: "sect"
+    description: "正道大宗，以剑道闻名"
+    
+  - id: "zixu"
+    name: "紫虚宫"
+    type: "sect"
+    description: "中立势力，精通丹药之术"
+    
+  - id: "chiyan"
+    name: "炽焰谷"
+    type: "sect"
+    description: "邪道魁首，野心勃勃"
+    
+  - id: "sanjie"
+    name: "三界战场"
+    type: "neutral"
+    description: "正邪交锋之地，机缘与危险并存"
+
+# 交通：地点间的移动时间（天数），0=瞬移/传送阵
+connections:
+  - from: "canglange"
+    to: "qingming"
+    days: 1
+  - from: "canglange"
+    to: "zixu"
+    days: 0  # 传送阵，瞬达
+  - from: "qingming"
+    to: "chiyan"
+    days: 2
+  - from: "chiyan"
+    to: "sanjie"
+    days: 1
+  - from: "canglange"
+    to: "sanjie"
+    days: 2
+
+# 角色（16个主角）
+characters:
+  - id: "p001"
+    name: "李青云"
+    sect: "canglange"
+    role: "protagonist"
+    age: 18
+    cultivation: "筑基中期"
+    personality: "沉稳内敛，心怀天下"
+    background: "苍澜阁阁主关门弟子"
+    
+  - id: "p002"
+    name: "慕容雪"
+    sect: "canglange"
+    role: "protagonist"
+    age: 17
+    cultivation: "筑基初期"
+    personality: "外冷内热，冰雪聪明"
+    background: "苍澜阁大小姐，资质超群"
+    
+  - id: "p003"
+    name: "陈玄风"
+    sect: "qingming"
+    role: "protagonist"
+    age: 20
+    cultivation: "金丹初期"
+    personality: "豪迈洒脱，重情重义"
+    background: "青冥宗首席弟子"
+    
+  - id: "p004"
+    name: "叶轻眉"
+    sect: "zixu"
+    role: "protagonist"
+    age: 19
+    cultivation: "筑基后期"
+    personality: "温婉聪慧，医术精湛"
+    background: "紫虚宫药王峰弟子"
+    
+  - id: "p005"
+    name: "厉无痕"
+    sect: "chiyan"
+    role: "protagonist"
+    age: 22
+    cultivation: "金丹后期"
+    personality: "阴狠果决，野心勃勃"
+    background: "炽焰谷少谷主"
+    
+  - id: "p006"
+    name: "周小 D"
+    sect: "canglange"
+    role: "protagonist"
+    age: 18
+    cultivation: "筑基初期"
+    personality: "活泼开朗，贪吃好玩"
+    background: "苍澜阁杂役弟子"
+
+# 初始位置
+initial_state:
+  day: 1
+  positions:
+    p001: "canglange"
+    p002: "canglange"
+    p003: "qingming"
+    p004: "zixu"
+    p005: "chiyan"
+    p006: "canglange"

@@ -1,0 +1,34 @@
+# 剧本示例
+nodes:
+  "chapter_1_01":
+    title: "苍澜阁之变"
+    description: "苍澜阁阁主突然失踪，门派陷入混乱"
+    trigger:
+      type: "day"
+      value: 3
+    actions:
+      - type: "force_event"
+        target_id: "p001"
+        content: "师父留言：速来禁地，有要事相商"
+      - type: "move_character"
+        character_id: "p001"
+        destination: "sanjie"
+    consequences:
+      - type: "unlock_plot"
+        plot_id: "chapter_1_02"
+
+  "chapter_1_02":
+    title: "命运的相遇"
+    description: "李青云在三界战场遇到慕容雪"
+    trigger:
+      type: "location"
+      character: "p001"
+      location: "sanjie"
+    actions:
+      - type: "force_event"
+        target_id: "p001"
+        content: "三界战场相遇，共闯秘境"
+    consequences:
+      - type: "modify_state"
+        key: "p001_p002_relationship"
+        value: "friendly"
