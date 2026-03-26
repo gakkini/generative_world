@@ -8,6 +8,16 @@ from .perception import PerceptionSystem, PerceptionEvent
 from .dialogue import DialogueGenerator, Dialogue
 
 
+class DialogueContext:
+    """轻量级对话上下文对象，避免重复创建Agent实例"""
+    def __init__(self, id, name, sect, cultivation, current_location):
+        self.id = id
+        self.name = name
+        self.sect = sect
+        self.cultivation = cultivation
+        self.current_location = current_location
+
+
 class Agent:
     """
     完整的Agent智能体
@@ -131,7 +141,7 @@ class Agent:
                 continue
             
             if other_loc == self.current_location:
-                # 在同一位置
+                # 在同一位置 - 获取其他角色的基本信息
                 other_config = next(
                     (c for c in self.world.config['characters'] 
                      if c['id'] == other_id),
@@ -139,13 +149,19 @@ class Agent:
                 )
                 
                 if other_config:
-                    other_agent = Agent(other_config, self.world)
-                    other_agent.current_location = other_loc
+                    # 创建轻量级对话上下文对象，不创建完整Agent实例
+                    other_context = DialogueContext(
+                        id=other_config['id'],
+                        name=other_config['name'],
+                        sect=other_config['sect'],
+                        cultivation=other_config.get('cultivation', '凡人'),
+                        current_location=other_loc
+                    )
                     
                     if self.dialogue_gen.should_initiate_dialogue(
-                        self, other_agent, "同处一地"
+                        self, other_context, "同处一地"
                     ):
-                        interactions.append(other_agent)
+                        interactions.append(other_context)
         
         return interactions
     

@@ -70,7 +70,8 @@ class World:
             'day': self.time.day,
             'character': char_id,
             'type': event_type,
-            'content': content
+            'content': content,
+            'location': self.positions.get(char_id)
         })
     
     def get_events_for_character(self, char_id) -> list:
@@ -97,5 +98,6 @@ class World:
         return {
             'day': self.time.day,
             'time_str': self.time.get_full_time_str(),
-            'positions': self.positions.copy()
+            'positions': self.positions.copy(),
+            'locations': self.locations
         }

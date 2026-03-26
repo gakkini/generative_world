@@ -49,7 +49,7 @@ def run_day(world, protagonists, npcs, plot_engine, diary_writer, day_num):
     
     # 主角行动
     for agent_id, agent in protagonists.items():
-        run_agent_day(agent, world, plot_engine, diary_writer)
+        run_agent_day(agent, world, protagonists, npcs, plot_engine, diary_writer)
     
     # NPC行动（简化）
     for npc_id, npc in npcs.items():
@@ -64,7 +64,7 @@ def run_day(world, protagonists, npcs, plot_engine, diary_writer, day_num):
             agent.reflect()
 
 
-def run_agent_day(agent, world, plot_engine, diary_writer):
+def run_agent_day(agent, world, protagonists, npcs, plot_engine, diary_writer):
     """运行主角的一天"""
     print(f"\n【{agent.name}】")
     
@@ -87,8 +87,8 @@ def run_agent_day(agent, world, plot_engine, diary_writer):
     # 执行
     agent.act()
     
-    # 剧本检查
-    plot_engine.check_triggers({**{a.id: a for a in [agent]}, **{n.id: n for n in [agent]}})
+    # 剧本检查 - 分别传入 protagonists 和 npcs，避免键冲突
+    plot_engine.check_triggers({**{a.id: a for a in protagonists.values()}, **{n.id: n for n in npcs.values()}})
     
     # 日记
     use_llm = hasattr(agent.planner, 'llm_client') and agent.planner.llm_client
