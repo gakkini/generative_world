@@ -227,7 +227,7 @@ class WorkingMemory:
         self.agent_id = agent_id
         self.current_plans = []  # 当前计划
         self.current_plan_index = 0
-        self. plan_context = {}  # 计划执行上下文
+        self.plan_context = {}  # 计划执行上下文
         self.attending_to = None  # 当前关注点
         self.pending_actions = []  # 待执行动作队列
     

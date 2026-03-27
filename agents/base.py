@@ -132,37 +132,27 @@ class Agent:
     
     # ==================== 对话模块 ====================
     
-    def check_for_interactions(self) -> list:
-        """检查是否有可以互动的角色"""
+    def check_for_interactions(self, all_agents: dict) -> list:
+        """检查是否有可以互动的角色
+
+        Args:
+            all_agents: 所有角色的字典 {id: Agent}, 包含protagonists和npcs
+        """
         interactions = []
-        
+
         for other_id, other_loc in self.world.positions.items():
             if other_id == self.id:
                 continue
-            
+
             if other_loc == self.current_location:
-                # 在同一位置 - 获取其他角色的基本信息
-                other_config = next(
-                    (c for c in self.world.config['characters'] 
-                     if c['id'] == other_id),
-                    None
-                )
-                
-                if other_config:
-                    # 创建轻量级对话上下文对象，不创建完整Agent实例
-                    other_context = DialogueContext(
-                        id=other_config['id'],
-                        name=other_config['name'],
-                        sect=other_config['sect'],
-                        cultivation=other_config.get('cultivation', '凡人'),
-                        current_location=other_loc
-                    )
-                    
+                # 在同一位置 - 直接获取实际的Agent实例，避免状态丢失
+                other_agent = all_agents.get(other_id)
+                if other_agent:
                     if self.dialogue_gen.should_initiate_dialogue(
-                        self, other_context, "同处一地"
+                        self, other_agent, "同处一地"
                     ):
-                        interactions.append(other_context)
-        
+                        interactions.append(other_agent)
+
         return interactions
     
     def interact(self, other_agent) -> Dialogue:

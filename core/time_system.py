@@ -9,10 +9,13 @@ class TimeSystem:
         self.month = 1
         self.year = 1
         self.days_per_year = config.get('days_per_year', 360) if config else 360
+        self.days_per_month = config.get('days_per_month', 30) if config else 30
         
     def advance(self, days=1):
         """推进时间"""
         self.day += days
+        # 月份更新
+        self.month = (self.day - 1) // self.days_per_month + 1
         while self.day > self.days_per_year:
             self.day -= self.days_per_year
             self.year += 1

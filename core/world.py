@@ -71,7 +71,8 @@ class World:
             'character': char_id,
             'type': event_type,
             'content': content,
-            'location': self.positions.get(char_id)
+            'location': self.positions.get(char_id),
+            'location_name': self.locations.get(self.positions.get(char_id), {}).get('name', '未知')
         })
     
     def get_events_for_character(self, char_id) -> list:

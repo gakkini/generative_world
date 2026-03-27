@@ -131,11 +131,13 @@ class DialogueGenerator:
             topics.append(topic)
         
         # 从记忆中提取话题
-        recent_interactions = agent.memory.get_events_with_person(
-            other_agent.id,
-            agent.world.time.day if hasattr(agent, 'world') else 1,
-            n=2
-        )
+        recent_interactions = []
+        if hasattr(agent, 'memory') and agent.memory:
+            recent_interactions = agent.memory.get_events_with_person(
+                other_agent.id,
+                agent.world.time.day if hasattr(agent, 'world') else 1,
+                n=2
+            )
         if recent_interactions:
             topics.append(f"上次与道友谈及{recent_interactions[0].content[:15]}...")
         

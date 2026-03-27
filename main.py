@@ -72,9 +72,10 @@ def run_agent_day(agent, world, protagonists, npcs, plot_engine, diary_writer):
     perceptions = agent.perceive()
     perception_desc = agent.get_perception_narrative()
     print(f"  👁️ 感知：{perception_desc}")
-    
-    # 互动
-    interactions = agent.check_for_interactions()
+
+    # 互动 - 传入完整agents字典，避免状态丢失
+    all_agents = {a.id: a for a in protagonists.values()} | {n.id: n for n in npcs.values()}
+    interactions = agent.check_for_interactions(all_agents)
     if interactions:
         other = interactions[0]
         dialogue = agent.interact(other)
@@ -87,8 +88,8 @@ def run_agent_day(agent, world, protagonists, npcs, plot_engine, diary_writer):
     # 执行
     agent.act()
     
-    # 剧本检查 - 分别传入 protagonists 和 npcs，避免键冲突
-    plot_engine.check_triggers({**{a.id: a for a in protagonists.values()}, **{n.id: n for n in npcs.values()}})
+    # 剧本检查 - 使用dict union避免键冲突
+    plot_engine.check_triggers({a.id: a for a in protagonists.values()} | {n.id: n for n in npcs.values()})
     
     # 日记
     use_llm = hasattr(agent.planner, 'llm_client') and agent.planner.llm_client
