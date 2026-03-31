@@ -1,5 +1,6 @@
 """
 Agent基类 - 整合所有认知模块
+增强版：集成 ReflectionEngine, RelationshipManager, EventBus, SocialNetwork, BehaviorSpread
 """
 import random
 from .memory import AssociativeMemory, WorkingMemory
@@ -21,10 +22,14 @@ class DialogueContext:
 class Agent:
     """
     完整的Agent智能体
-    整合：记忆 + 感知 + 规划 + 对话 + 日记
+    整合：记忆 + 感知 + 规划 + 对话 + 日记 + 反思 + 关系 + 社交网络
     """
     
-    def __init__(self, config, world):
+    def __init__(self, config, world, 
+                 social_network=None,
+                 relationship_manager=None,
+                 event_bus=None,
+                 behavior_engine=None):
         # 基本信息
         self.id = config['id']
         self.name = config['name']
@@ -53,6 +58,28 @@ class Agent:
         self.planner = PlanGenerator()  # 规划器
         self.dialogue_gen = DialogueGenerator()  # 对话生成器
         
+        # ========== 新增模块 ==========
+        # 反思引擎
+        self.reflection_engine = None
+        
+        # 关系管理器（可选，由外部注入）
+        self.relationship_manager = relationship_manager
+        
+        # 事件总线（可选）
+        self.event_bus = event_bus
+        
+        # 社交网络（可选）
+        self.social_network = social_network
+        
+        # 行为传播引擎（可选）
+        self.behavior_engine = behavior_engine
+        
+        # 待处理的社交事件
+        self.pending_invitations = []
+        self.active_social_events = []
+        
+        # ========== 原有初始化 ==========
+        
         # 当前计划
         self.current_plan = None
         self.current_actions = []
@@ -63,6 +90,54 @@ class Agent:
         
         # 初始化
         self._init_relationships()
+        self._init_enhanced_modules()
+    
+    def _init_enhanced_modules(self):
+        """初始化增强模块"""
+        # 延迟导入避免循环依赖
+        try:
+            from .reflection import ReflectionEngine
+            from .social_network import SocialNetwork
+            from .relationship import RelationshipManager
+            from .event_bus import EventBus
+            from .behavior_spread import EmergentBehaviorEngine
+            
+            # 初始化反思引擎
+            self.reflection_engine = ReflectionEngine(self.id)
+            
+            # 如果没有提供关系管理器，创建本地版本并同步
+            if self.relationship_manager is None:
+                self.relationship_manager = RelationshipManager()
+            
+            # 如果提供了社交网络，注册自己
+            if self.social_network:
+                self.social_network.add_agent(self.id)
+            
+            # 如果有事件总线，订阅相关事件
+            if self.event_bus:
+                self.event_bus.subscribe(self.id, '*', self._handle_event)
+            
+        except ImportError as e:
+            print(f"Warning: Enhanced modules not available: {e}")
+    
+    def _handle_event(self, event):
+        """处理收到的事件"""
+        if event.type == 'invitation':
+            # 收到邀请
+            self.pending_invitations.append({
+                'event_id': event.id,
+                'content': event.content,
+                'from': event.source_id,
+                'day': event.day
+            })
+        elif event.type == 'notification':
+            # 收到通知
+            self.add_memory_event(
+                f"收到通知：{event.content}",
+                event_type='notification'
+            )
+    
+    # ==================== 关系系统 ====================
     
     def _init_relationships(self):
         """初始化关系"""
@@ -98,6 +173,67 @@ class Agent:
                     'level': 0,
                     'history': []
                 }
+        
+        # 同步到 RelationshipManager
+        if self.relationship_manager:
+            for other_id, rel_data in self.relationships.items():
+                rel = self.relationship_manager.initialize_relationship(
+                    self.id,
+                    other_id,
+                    initial_affinity=rel_data.get('level', 0)
+                )
+    
+    def update_relationship(self, other_id: str, delta: float, 
+                          interaction_type: str = 'dialogue',
+                          sentiment: float = 0.0):
+        """
+        更新与某人的关系
+        
+        Args:
+            other_id: 对方ID
+            delta: 关系变化量
+            interaction_type: 交互类型
+            sentiment: 情感极性 -1.0 ~ 1.0
+        """
+        if other_id not in self.relationships:
+            self.relationships[other_id] = {
+                'type': 'stranger',
+                'level': 0,
+                'history': []
+            }
+        
+        self.relationships[other_id]['level'] += delta
+        self.relationships[other_id]['level'] = max(-100, min(100, 
+            self.relationships[other_id]['level']))
+        
+        # 同步到 RelationshipManager
+        if self.relationship_manager:
+            self.relationship_manager.record_interaction(
+                self.id,
+                other_id,
+                interaction_type,
+                sentiment,
+                self.world.time.day,
+                self.current_location
+            )
+    
+    def get_relationship_with(self, other_id: str) -> dict:
+        """获取与某人的关系详情"""
+        if other_id in self.relationships:
+            return self.relationships[other_id]
+        
+        # 尝试从 RelationshipManager 获取
+        if self.relationship_manager:
+            rel = self.relationship_manager.get_relationship(self.id, other_id)
+            if rel:
+                return {
+                    'type': rel.stage.value,
+                    'level': rel.affinity,
+                    'trust': rel.trust,
+                    'familiarity': rel.familiarity
+                }
+        
+        return {'type': 'unknown', 'level': 0}
     
     # ==================== 感知模块 ====================
     
@@ -121,6 +257,17 @@ class Agent:
                     location=self.current_location,
                     event_type='observation'
                 )
+            
+            # 如果感知到其他角色，同步到社交网络
+            if p.type == 'character' and hasattr(p, 'source'):
+                if self.social_network:
+                    self.social_network.record_interaction(
+                        self.id,
+                        p.source,
+                        'perceive',
+                        self.world.time.day,
+                        1.0  # 轻微正面
+                    )
         
         return perceptions
     
@@ -182,12 +329,32 @@ class Agent:
                     event_type='dialogue'
                 )
         
-        # 更新关系
-        self._update_relationship_after_dialogue(other_agent, dialogue)
+        # 更新关系（双向）
+        sentiment = 0.5 if '友好' in dialogue.get_summary() else -0.3 if '冲突' in dialogue.get_summary() else 0.0
+        self._update_relationship_after_dialogue(other_agent, dialogue, sentiment)
+        
+        # 记录到社交网络
+        if self.social_network:
+            self.social_network.record_interaction(
+                self.id,
+                other_agent.id,
+                'dialogue',
+                self.world.time.day,
+                sentiment * 10  # 转换为 delta
+            )
+        
+        # 通过事件总线发送消息
+        if self.event_bus:
+            self.event_bus.publish_message(
+                self.id,
+                other_agent.id,
+                dialogue.get_summary(),
+                self.world.time.day
+            )
         
         return dialogue
     
-    def _update_relationship_after_dialogue(self, other_agent, dialogue):
+    def _update_relationship_after_dialogue(self, other_agent, dialogue, sentiment=0.0):
         """对话后更新关系"""
         if other_agent.id not in self.relationships:
             self.relationships[other_agent.id] = {
@@ -207,12 +374,28 @@ class Agent:
             rel['level'] += random.randint(-2, 3)
         
         rel['history'].append(dialogue.get_summary())
+        
+        # 同步到 RelationshipManager
+        if self.relationship_manager:
+            self.relationship_manager.record_interaction(
+                self.id,
+                other_agent.id,
+                'dialogue',
+                sentiment,
+                self.world.time.day,
+                self.current_location
+            )
     
     # ==================== 规划模块 ====================
     
     def plan(self) -> list:
         """制定今日计划"""
         world_state = self.world.get_state_summary()
+        
+        # 检查是否有待处理的邀请
+        if self.pending_invitations:
+            # 将邀请纳入计划考量
+            world_state['pending_invitations'] = self.pending_invitations
         
         # 尝试使用LLM生成计划（如果有配置）
         if hasattr(self.planner, 'llm_client') and self.planner.llm_client:
@@ -240,6 +423,8 @@ class Agent:
             result = self._execute_social(action)
         elif action.name == 'move':
             result = self._execute_move(action)
+        elif action.name == 'respond_invitation':
+            result = self._execute_respond_invitation(action)
         else:
             result = f"{self.name}执行了动作：{action.description}"
         
@@ -299,6 +484,26 @@ class Agent:
                 return f"御剑前往{action.destination}，历时{days}日"
         return "执行移动"
     
+    def _execute_respond_invitation(self, action) -> str:
+        """执行回复邀请"""
+        event_id = getattr(action, 'event_id', None)
+        accept = getattr(action, 'accept', True)
+        
+        if not event_id or not self.behavior_engine:
+            return "无法处理邀请"
+        
+        # 处理邀请回复
+        self.behavior_engine.process_invitation_response(
+            event_id,
+            self.id,
+            accept,
+            self.world.time.day,
+            {'agent': self}
+        )
+        
+        status = "接受" if accept else "拒绝"
+        return f"对邀请({event_id}){status}"
+    
     def act(self):
         """执行今日所有动作"""
         results = []
@@ -319,9 +524,18 @@ class Agent:
         if len(recent_events) < 5:
             return  # 记忆太少不反思
         
-        # 生成反思
-        insights = self._generate_insights(recent_events)
+        # 使用增强版反思引擎
+        if self.reflection_engine:
+            new_reflections = self.reflection_engine.generate_reflections(
+                self, recent_events, current_day
+            )
+            
+            # 将反思添加到记忆中
+            for ref in new_reflections:
+                self.memory.add_reflection(ref.content, ref.day)
         
+        # 原有的简单反思保留作为fallback
+        insights = self._generate_insights(recent_events)
         for insight in insights:
             self.memory.add_reflection(insight, current_day)
     
@@ -353,11 +567,54 @@ class Agent:
         
         return insights if insights else ["今日修行，平平无奇"]
     
+    # ==================== 社交行为模块 ====================
+    
+    def initiate_social_event(self, event_type: str, content: str, 
+                             target_location: str = None) -> str:
+        """
+        发起一个社交事件（派对、聚会等）
+        
+        Returns:
+            event_id
+        """
+        if not self.behavior_engine:
+            return None
+        
+        from .behavior_spread import SocialBehaviorType
+        
+        type_map = {
+            'party': SocialBehaviorType.PARTY,
+            'invitation': SocialBehaviorType.INVITATION,
+            'date': SocialBehaviorType.DATE,
+            'gathering': SocialBehaviorType.PARTY,
+        }
+        
+        bh_type = type_map.get(event_type, SocialBehaviorType.INVITATION)
+        
+        event = self.behavior_engine.initiate_behavior(
+            bh_type,
+            self.id,
+            content,
+            self.world.time.day,
+            target_location
+        )
+        
+        self.active_social_events.append(event.id)
+        
+        return event.id
+    
+    def check_pending_invitations(self) -> list:
+        """检查待回复的邀请"""
+        if not self.behavior_engine:
+            return self.pending_invitations
+        
+        return self.behavior_engine.get_pending_invitations(self.id)
+    
     # ==================== 日记模块 ====================
     
     def get_prompt_context(self) -> dict:
         """获取用于生成日记的上下文"""
-        return {
+        ctx = {
             'name': self.name,
             'sect': self.sect,
             'cultivation': self.cultivation,
@@ -379,6 +636,24 @@ class Agent:
                 )
             ]
         }
+        
+        # 添加关系信息
+        if self.relationship_manager:
+            ctx['relationship_summary'] = self.relationship_manager.get_relationship_summary(self.id)
+        
+        # 添加反思信息
+        if self.reflection_engine:
+            recent_reflections = self.reflection_engine.get_recent_reflections(
+                self.world.time.day, days=7
+            )
+            ctx['recent_reflections'] = [r.content for r in recent_reflections]
+        
+        # 添加社交事件信息
+        if self.behavior_engine:
+            pending = self.check_pending_invitations()
+            ctx['pending_invitations'] = pending
+        
+        return ctx
     
     def _get_dialogue_summary(self) -> str:
         """获取今日对话摘要"""
@@ -427,10 +702,59 @@ class Agent:
         return days
 
 
-def create_agents(config, world) -> dict:
-    """批量创建角色"""
+def create_agents(config, world, 
+                 social_network=None,
+                 relationship_manager=None,
+                 event_bus=None,
+                 behavior_engine=None) -> dict:
+    """
+    批量创建角色
+    
+    Args:
+        config: 世界配置
+        world: 世界实例
+        social_network: 社交网络（可选，共享实例）
+        relationship_manager: 关系管理器（可选，共享实例）
+        event_bus: 事件总线（可选，共享实例）
+        behavior_engine: 行为引擎（可选，共享实例）
+    """
     agents = {}
+    
     for char_config in config['characters']:
         if char_config.get('role') == 'protagonist':
-            agents[char_config['id']] = Agent(char_config, world)
+            agents[char_config['id']] = Agent(
+                char_config, 
+                world,
+                social_network=social_network,
+                relationship_manager=relationship_manager,
+                event_bus=event_bus,
+                behavior_engine=behavior_engine
+            )
+    
     return agents
+
+
+def create_shared_systems():
+    """
+    创建共享系统（供多个Agent使用）
+    
+    Returns:
+        (social_network, relationship_manager, event_bus, behavior_engine)
+    """
+    from .social_network import SocialNetwork, BehaviorSpreadEngine
+    from .relationship import RelationshipManager
+    from .event_bus import EventBus
+    from .behavior_spread import EmergentBehaviorEngine
+    
+    social_network = SocialNetwork()
+    relationship_manager = RelationshipManager()
+    event_bus = EventBus(
+        social_network=social_network,
+        relationship_manager=relationship_manager
+    )
+    behavior_engine = EmergentBehaviorEngine(
+        social_network=social_network,
+        relationship_manager=relationship_manager
+    )
+    
+    return social_network, relationship_manager, event_bus, behavior_engine
