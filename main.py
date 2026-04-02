@@ -263,7 +263,7 @@ def main():
     print("开始模拟...")
     print("=" * 60)
     
-    days = 5
+    days = 3
     for day in range(1, days + 1):
         run_day(world, protagonists, npcs, plot_engine, diary_writer, day, shared_systems)
     

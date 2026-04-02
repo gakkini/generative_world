@@ -1,6 +1,7 @@
 """
 规划模块 - Agent的规划大脑
 根据记忆、目标、当前状态生成行为计划
+仅支持LLM版本，模板版本已移除
 """
 import random
 import time
@@ -24,7 +25,6 @@ class Action:
     def execute(self, agent) -> str:
         """执行动作"""
         self.status = 'executing'
-        # 实际执行逻辑在agent中
         self.status = 'completed'
         return f"{agent.name}执行了动作：{self.name}"
 
@@ -57,244 +57,241 @@ class Plan:
 class PlanGenerator:
     """
     计划生成器 - 核心规划大脑
+    仅支持LLM版本，强制要求llm_client配置
     """
-    
-    # 地点行为模板
-    LOCATION_ACTIVITIES = {
-        'sect': [
-            ('cultivate', '在宗门内修炼', 1, 'cultivation'),
-            ('visit_master', '拜访师父请益', 1, 'social'),
-            ('train_with_peers', '与师兄弟切磋', 1, 'social'),
-            ('attend_lecture', '参加宗门讲座', 1, 'learning'),
-            ('collect_resources', '采集灵草灵石', 2, 'resource'),
-        ],
-        'neutral': [
-            ('explore', '探索此区域', 1, 'adventure'),
-            ('trade', '与当地人交易', 1, 'resource'),
-            ('gather_info', '打探消息', 1, 'information'),
-            ('rest', '在客栈休息', 1, 'recovery'),
-        ],
-        'hostile': [
-            ('investigate', '调查危险区域', 1, 'adventure'),
-            ('fight', '与敌人战斗', 1, 'combat'),
-            ('sneak', '潜行探索', 1, 'stealth'),
-            ('retreat', '伺机撤退', 1, 'survival'),
-        ]
-    }
-    
-    # 角色类型行为偏好
-    PERSONALITY_ACTIVITIES = {
-        '沉稳内敛': ['cultivate', 'visit_master', 'investigate'],
-        '外冷内热': ['train_with_peers', 'explore', 'fight'],
-        '豪迈洒脱': ['train_with_peers', 'visit_tavern', 'gather_info'],
-        '温婉聪慧': ['visit_master', 'trade', 'collect_resources'],
-        '阴狠果决': ['investigate', 'fight', 'sneak'],
-        '活泼开朗': ['train_with_peers', 'attend_lecture', 'explore'],
-    }
     
     def __init__(self, llm_client=None):
         self.llm_client = llm_client
     
     def generate_daily_plan(self, agent, world_state: dict) -> list:
         """
-        生成今日计划
-        
-        Returns:
-            list of Action
+        生成今日计划（仅LLM版本）
+        如果未配置LLM客户端，抛出异常
         """
+        if not self.llm_client:
+            raise RuntimeError(
+                f"[PlanGenerator] {agent.name} 未配置LLM客户端，无法生成计划。"
+                " 请在初始化时配置 llm_client。（主角强制使用LLM版本）"
+            )
+        
+        return self._generate_plan_via_llm(agent, world_state)
+    
+    def _generate_plan_via_llm(self, agent, world_state: dict) -> list:
+        """通过LLM生成计划"""
+        prompt = self._build_plan_prompt(agent, world_state)
+        
+        response = self.llm_client.generate(
+            prompt,
+            system_prompt="你是一个修仙世界的行为规划专家。请严格按照输出格式生成计划。",
+            max_tokens=1500,
+            temperature=0.8
+        )
+        
+        actions = self._parse_plan_response(response, agent)
+        return actions
+    
+    def _build_plan_prompt(self, agent, world_state: dict) -> str:
+        """构建计划生成Prompt"""
         current_location = agent.current_location
-        location_type = world_state.get('locations', {}).get(
-            current_location, {}
-        ).get('type', 'neutral')
+        location_info = world_state.get('locations', {}).get(current_location, {})
+        location_name = location_info.get('name', current_location)
+        location_type = location_info.get('type', 'neutral')
         
-        # 获取可用的行为模板
-        available_activities = self.LOCATION_ACTIVITIES.get(
-            location_type, 
-            self.LOCATION_ACTIVITIES['neutral']
-        )
+        recent_events = agent.memory.get_recent_events(
+            world_state.get('day', 1), days=3
+        ) if hasattr(agent, 'memory') else []
+        recent_str = "\n".join([f"- {e.content}" for e in recent_events[-5:]]) or "暂无"
         
-        # 根据角色性格调整
-        personality = agent.personality
-        preferred = self.PERSONALITY_ACTIVITIES.get(
-            personality,
-            [a[0] for a in available_activities]
-        )
+        relationships = self._get_relationship_summary(agent)
         
-        # 选择1-3个动作
-        num_actions = random.choices(
-            [1, 2, 3],
-            weights=[0.4, 0.4, 0.2]
-        )[0]
+        return f"""你是{agent.name}（{agent.sect} {agent.cultivation}）。
+
+【角色基本信息】
+- 性格：{agent.personality}
+- 目标：{', '.join(agent.goals) if agent.goals else '无'}
+- 当前位置：{location_name}（{location_type}）
+
+【当前时间】
+{world_state.get('time_str', f'第{world_state.get("day", 1)}日')}
+
+【近三日经历】
+{recent_str}
+
+【当前人际关系】
+{relationships}
+
+【可选动作类型】（根据位置和性格选择1-3个）
+宗门内：修炼、拜访师父、与师兄弟切磋、参加讲座、采集灵草
+中立区：探索、与当地人交易、打探消息、客栈休息
+危险区：调查危险区域、与敌人战斗、潜行探索
+
+请制定今日计划，严格按以下JSON格式输出（不要有其他内容）：
+{{
+  "goal": "计划目标一句话描述",
+  "actions": [
+    {{"name": "动作名", "description": "动作详细描述", "duration": 1}},
+    ...
+  ]
+}}
+
+要求：
+1. 动作数量1-3个
+2. 必须符合角色性格和当前位置
+3. 动作描述要有修仙世界特色
+4. JSON外不要有多余文字（只需输出JSON）
+        """
+        
+    def _get_relationship_summary(self, agent) -> str:
+        """获取关系摘要"""
+        if not hasattr(agent, 'relationships') or not agent.relationships:
+            return "暂无深厚交情"
+        
+        recent = [
+            (rid, r) for rid, r in agent.relationships.items()
+            if r.get('level', 0) > 30
+        ]
+        
+        if not recent:
+            return "暂无深厚交情"
+        
+        return ", ".join([
+            f"{rid}(关系{r.get('level', 0)}, {r.get('type', '相识')})" 
+            for rid, r in recent[:5]
+        ])
+    
+    def _parse_plan_response(self, response: str, agent) -> list:
+        """解析LLM返回的计划JSON"""
+        import json
+        import re
+        
+        # 尝试提取JSON块
+        json_match = re.search(r'\{[\s\S]*\}', response)
+        if not json_match:
+            # Fallback: 尝试直接解析
+            try:
+                data = json.loads(response.strip())
+            except Exception:
+                # 最后一次尝试：提取所有"动作"相关行
+                return self._fallback_parse(response, agent)
+        else:
+            try:
+                data = json.loads(json_match.group())
+            except Exception:
+                return self._fallback_parse(response, agent)
         
         actions = []
-        used_types = set()
+        goal = data.get('goal', f'{agent.name}的今日计划')
         
-        for _ in range(num_actions):
-            # 优先选择性格匹配的行为
-            candidates = [
-                a for a in available_activities
-                if a[0] in preferred and a[0] not in used_types
-            ]
-            if not candidates:
-                candidates = [
-                    a for a in available_activities
-                    if a[0] not in used_types
-                ]
-            
-            if not candidates:
-                continue
-            
-            # 根据性格权重选择
-            activity = random.choice(candidates)
-            used_types.add(activity[0])
-            
+        for a in data.get('actions', []):
             action = Action(
-                name=activity[0],
-                description=activity[1],
-                duration=activity[2],
-                location=current_location
+                name=a.get('name', 'unknown'),
+                description=a.get('description', ''),
+                duration=a.get('duration', 1),
+                location=agent.current_location
             )
             actions.append(action)
         
-        # 如果是角色有目标，添加目标相关动作
-        if hasattr(agent, 'goals') and agent.goals:
-            goal_action = self._generate_goal_action(agent)
-            if goal_action:
-                actions.insert(0, goal_action)
+        # 如果没有解析出动作，fallback
+        if not actions:
+            return self._fallback_parse(response, agent)
         
         return actions
     
-    def _generate_goal_action(self, agent) -> Action:
-        """根据角色目标生成动作"""
-        if not agent.goals:
-            return None
+    def _fallback_parse(self, response: str, agent) -> list:
+        """Fallback: 当JSON解析失败时"""
+        actions = []
         
-        primary_goal = agent.goals[0]
+        # 提取所有"-"或"1."开头的动作行
+        lines = response.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('-') or (len(line) > 2 and line[1] == '.'):
+                desc = line.lstrip('123456789.-、 ')
+                if desc:
+                    actions.append(Action(
+                        name='cultivate',
+                        description=desc,
+                        duration=1,
+                        location=agent.current_location
+                    ))
         
-        # 目标驱动的动作映射
-        goal_actions = {
-            '修炼成仙': ('deep_cultivation', '闭关于山顶感悟天道', 1),
-            '保护亲友': ('guard_around', '守护在意之人', 1),
-            '寻找真相': ('investigate_secret', '追查线索', 1),
-            '证明自己': ('compete', '参加宗门大比', 2),
-            '拯救苍生': ('patrol', '巡视世间', 1),
-            '寻找真爱': ('socialize', '广交好友', 1),
-        }
-        
-        action_spec = goal_actions.get(primary_goal)
-        if action_spec:
-            return Action(
-                name=action_spec[0],
-                description=action_spec[1],
-                duration=action_spec[2],
+        # 最基础的fallback
+        if not actions:
+            actions.append(Action(
+                name='cultivate',
+                description='按计划修炼',
+                duration=1,
                 location=agent.current_location
-            )
+            ))
         
-        return None
+        return actions
     
     def revise_plan(self, agent, plan: Plan, world_state: dict) -> Plan:
         """
         动态调整计划
         当发生意外事件时，调整原有计划
         """
-        # 检查是否有紧急事件
-        recent_events = agent.memory.get_recent_events(
-            world_state.get('day', 1), 
-            days=1
-        )
+        if not self.llm_client:
+            # 无LLM时用简单规则处理紧急事件
+            return self._revise_plan_simple(agent, plan, world_state)
         
-        urgent_keywords = ['危险', '敌人', '求救', '紧急', '发现', '秘境']
+        prompt = f"""你是{agent.name}的计划调整专家。
+
+原计划：{[a.description for a in plan.actions]}
+当前事件：{world_state.get('recent_events', [])}
+今日突发事件：{world_state.get('urgent_events', [])}
+
+如果存在紧急事件，在原计划前插入应对动作。
+输出JSON格式：
+{{
+  "revised": true/false,
+  "reason": "调整原因",
+  "actions": [
+    {{"name": "动作名", "description": "描述", "duration": 1, "urgent": true/false}}
+  ]
+}}
+        """
+        response = self.llm_client.generate(prompt, max_tokens=800, temperature=0.7)
+        
+        try:
+            import json, re
+            m = re.search(r'\{[\s\S]*\}', response)
+            if m:
+                data = json.loads(m.group())
+                if data.get('revised'):
+                    # 清空原计划，替换为新计划
+                    plan.actions = []
+                    for a in data.get('actions', []):
+                        action = Action(
+                            name=a.get('name', 'unknown'),
+                            description=a.get('description', ''),
+                            duration=a.get('duration', 1),
+                            location=agent.current_location
+                        )
+                        plan.add_action(action)
+        except Exception:
+            pass
+        
+        return plan
+    
+    def _revise_plan_simple(self, agent, plan: Plan, world_state: dict) -> Plan:
+        """简单规则调整计划（无LLM时）"""
+        recent_events = []
+        if hasattr(agent, 'memory'):
+            recent_events = agent.memory.get_recent_events(
+                world_state.get('day', 1), days=1
+            )
+        
+        urgent_keywords = ['危险', '敌人', '求救', '紧急', '发现', '秘境', '异象']
         
         for event in recent_events:
             if any(kw in event.content for kw in urgent_keywords):
-                # 插入紧急行动
                 urgent_action = Action(
                     name='respond_urgent',
                     description=f'应对紧急事件：{event.content}',
                     duration=1,
                     location=event.location
                 )
-                plan.add_action(urgent_action)
-        
-        return plan
-    
-    def generate_plan_with_llm(self, agent, world_state: dict) -> Plan:
-        """使用LLM生成更智能的计划"""
-        if not self.llm_client:
-            return Plan(self._fallback_goal(agent), agent.id)
-        
-        prompt = f"""你是{agent.name}（{agent.sect}弟子，修为{agent.cultivation}）。
-
-当前情况：
-- 时间：{world_state.get('time_str', '第1日')}
-- 位置：{world_state.get('locations', {}).get(agent.current_location, {}).get('name', agent.current_location)}
-- 最近经历：{agent.memory.get_recent_events(world_state.get('day', 1), days=3)}
-
-性格特点：{agent.personality}
-个人目标：{', '.join(agent.goals) if hasattr(agent, 'goals') and agent.goals else '无'}
-当前关系：{self._get_relationship_summary(agent)}
-
-请制定今日计划，考虑：
-1. 符合角色性格和目标
-2. 符合当前处境
-3. 适当推进剧情
-
-输出格式：
-计划目标：<一句话>
-执行动作：
-1. <动作1> - <描述>
-2. <动作2> - <描述>
-"""
-        
-        response = self.llm_client.generate(prompt)
-        return self._parse_llm_plan(response, agent)
-    
-    def _fallback_goal(self, agent) -> str:
-        """备用目标"""
-        return f"在{agent.current_location}修炼"
-    
-    def _get_relationship_summary(self, agent) -> str:
-        """获取关系摘要"""
-        if not hasattr(agent, 'relationships'):
-            return "暂无深厚交情"
-        
-        recent = [
-            (rid, r) for rid, r in agent.relationships.items()
-            if r.get('level', 0) > 50
-        ]
-        
-        if not recent:
-            return "暂无深厚交情"
-        
-        return ", ".join([f"{rid}({r.get('type', '相识')})" for rid, r in recent])
-    
-    def _parse_llm_plan(self, response: str, agent) -> Plan:
-        """解析LLM生成的计划"""
-        plan = Plan(f"LLM生成计划", agent.id)
-        
-        # 简单的文本解析
-        # TODO: 更 robust 的解析
-        lines = response.split('\n')
-        current_action = None
-        
-        for line in lines:
-            line = line.strip()
-            if line.startswith('1.') or line.startswith('-'):
-                desc = line.lstrip('123456789.- ')
-                action = Action(
-                    name='llm_action',
-                    description=desc,
-                    duration=1,
-                    location=agent.current_location
-                )
-                plan.add_action(action)
-        
-        if not plan.actions:
-            # Fallback
-            plan.add_action(Action(
-                name='cultivate',
-                description='按计划修炼',
-                duration=1
-            ))
+                plan.actions.insert(0, urgent_action)
         
         return plan

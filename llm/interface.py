@@ -61,6 +61,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         """调用LLM生成"""
         import urllib.request
         import urllib.error
+        import re
         
         # 构建消息
         messages = []
@@ -92,7 +93,11 @@ class OpenAICompatibleClient(BaseLLMClient):
                 
                 with urllib.request.urlopen(req, timeout=60) as response:
                     result = json.loads(response.read().decode("utf-8"))
-                    return result["choices"][0]["message"]["content"]
+                    content = result["choices"][0]["message"]["content"]
+                    
+                    # 去除 <think>...</think> 标签和其中的思考内容
+                    content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+                    return content
                     
             except urllib.error.HTTPError as e:
                 error_body = e.read().decode("utf-8") if e.fp else ""
@@ -110,13 +115,13 @@ class OpenAICompatibleClient(BaseLLMClient):
 class MiniMaxClient(OpenAICompatibleClient):
     """
     MiniMax专用客户端
-    API格式: https://api.minimaxi.com/anthropic/v1/chat/completions
+    API格式: https://api.minimaxi.com/v1/chat/completions (OpenAI兼容)
     """
     
     def __init__(self, api_key: str = None, model: str = "MiniMax-M2.7"):
         super().__init__(
             api_key=api_key,
-            base_url="https://api.minimaxi.com/anthropic/v1",
+            base_url="https://api.minimaxi.com/v1",
             model=model
         )
     

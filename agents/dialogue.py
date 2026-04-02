@@ -1,203 +1,250 @@
 """
-对话模块 - Agent间的对话生成
+对话生成模块 - 支持LLM增强版对话
+修复：处理LLM返回截断、think标记、retry机制
 """
 import random
-import time
+import re
 
 
 class DialogueLine:
-    """单句对话"""
+    """对话行"""
     
-    def __init__(self, speaker_id, content, emotion=None):
-        self.id = f"dlg_{int(time.time() * 1000)}"
-        self.speaker = speaker_id
+    def __init__(self, speaker_id: str, content: str):
+        self.speaker_id = speaker_id
         self.content = content
-        self.emotion = emotion  # neutral / happy / angry / fearful / etc.
-        self.timestamp = time.time()
+        self.sentiment = 0.0  # 情感极性
 
 
 class Dialogue:
-    """一段对话"""
+    """完整对话"""
     
-    def __init__(self, participants: list, topic=None):
-        self.id = f"dialogue_{int(time.time() * 1000)}"
-        self.participants = participants  # [char_id, ...]
+    def __init__(self, participants=None, topic="闲聊"):
+        self.participants = participants or []  # [id_a, id_b]
         self.topic = topic
         self.lines = []
-        self.context = {}  # 对话上下文
-        self.status = 'ongoing'  # ongoing / completed
+        self.status = 'active'  # active / completed
+        self.sentiment = 0.0
     
     def add_line(self, line: DialogueLine):
         self.lines.append(line)
     
-    def get_transcript(self) -> str:
-        """获取对话记录"""
-        return "\n".join([
-            f"{line.speaker}：{line.content}"
-            for line in self.lines
-        ])
-    
     def get_summary(self) -> str:
-        """获取对话摘要"""
+        if not self.lines:
+            return "无对话"
+        
+        total = len(self.lines)
+        last_line = self.lines[-1].content if self.lines else ""
+        return last_line
+
+    def get_transcript(self) -> str:
+        """获取完整对话记录"""
         if not self.lines:
             return ""
-        
-        first = self.lines[0]
-        last = self.lines[-1]
-        
-        return f"与{', '.join(self.participants)}讨论{self.topic}，从「{first.content[:20]}」到「{last.content[:20]}」"
+        return "\n".join([f"{line.speaker_id}：{line.content}" for line in self.lines])
 
 
-class DialogueGenerator:
+# ============ LLM对话生成 ============
+
+class LLMDialogueGenerator:
     """
-    对话生成器
-    基于记忆、关系、场景生成自然对话
+    基于LLM的对话生成器
+    解决：think标记截断、回复为空、格式错误
     """
     
-    # 对话模板
-    GREETING_TEMPLATES = [
-        "{speaker}点头示意：「道友有礼。」",
-        "{speaker}抱拳道：「幸会幸会，不知阁下如何称呼？」",
-        "{speaker}微微一笑：「这位道友面生得很，可是初来此地？」",
-    ]
-    
-    CULTIVATION_TOPICS = [
-        "近日修行可有所悟？",
-        "道友可知哪里灵气充沛，适合闭关？",
-        "听闻最近有秘境开启，不知是真是假？",
-        "筑基之道，道友可有心得？",
-    ]
-    
-    SECT_TOPICS = [
-        "不知贵派近日可有什么大事？",
-        "听闻{other_sect}与{self_sect}近来颇有嫌隙？",
-        "道友可知最近各宗门的动向？",
+    TEMPLATE_RESPONSES = [
+        "道友所言甚是。",
+        "嗯，此言有理。",
+        "愿闻其详。",
+        "确实如此，修仙界波诡云谲。",
+        "道友好见识。",
+        "善。",
+        "承蒙道友指点。",
     ]
     
     def __init__(self, llm_client=None):
         self.llm_client = llm_client
     
-    def should_initiate_dialogue(self, agent, other_agent, situation: str) -> bool:
+    def generate_response(self, speaker, listener, context: str,
+                          max_retries: int = 2) -> str:
         """
-        判断是否应该发起对话
-        
-        Args:
-            agent: 当前角色
-            other_agent: 对方
-            situation: 当前情境
-        
-        Returns:
-            bool: 是否发起对话
+        生成角色对话回复
+        自动处理LLM返回的各种异常情况
         """
-        # 性格因素
-        personality = agent.personality
+        if not self.llm_client:
+            return self._template_fallback(speaker)
         
-        # 沉稳内敛型不爱主动搭话
-        if '沉稳' in personality or '内向' in personality:
-            return random.random() < 0.3
+        prompt = self._build_dialogue_prompt(speaker, listener, context)
         
-        # 豪迈洒脱型主动
-        if '豪迈' in personality or '洒脱' in personality:
-            return random.random() < 0.7
+        for attempt in range(max_retries + 1):
+            raw = self.llm_client.generate(
+                prompt,
+                system_prompt=f"你是{speaker.name}，{speaker.sect}弟子，修为{speaker.cultivation}，性格{speaker.personality}。你正在与他人对话。请用一句简短的修仙风格的话回应。",
+                max_tokens=300,
+                temperature=0.85
+            )
+            
+            cleaned = self._clean_response(raw)
+            
+            # 检查是否有效
+            if self._is_valid_response(cleaned):
+                return cleaned
+            
+            if attempt < max_retries:
+                # 换一个prompt变体重试
+                prompt = self._build_dialogue_prompt_variant(
+                    speaker, listener, context, attempt
+                )
+                continue
         
-        # 活泼开朗型爱社交
-        if '活泼' in personality or '开朗' in personality:
+        # 所有重试都失败，使用模板fallback
+        return self._template_fallback(speaker)
+    
+    def _build_dialogue_prompt(self, speaker, listener, context: str) -> str:
+        """构建标准对话Prompt"""
+        return f"""{speaker.name}（{speaker.sect} {speaker.cultivation}，性格{speaker.personality}）
+当前情境：{context}
+
+上面对话中{speaker.name}刚说了一句话，对方回应后，现在需要{speaker.name}继续说。
+
+请用修仙世界的语气，以{speaker.name}的身份，说一句简短的回应（20字以内）。
+直接输出对话内容，不要有角色标签，不要有思考过程，不要有任何其他文字。"""
+    
+    def _build_dialogue_prompt_variant(self, speaker, listener, context: str, attempt: int) -> str:
+        """构建变体Prompt（重试时使用）"""
+        variants = [
+            f"道友「{context}」，作为{speaker.name}，简短回应一句（20字内）。直接输出台词。",
+            f"修仙对话情境：{speaker.name}性格{speaker.personality}，情境「{context}」。一句话回应。直接说出台词，不要其他内容。",
+            f"{speaker.name}在修仙世界与道友对话，对方说「{context}」。以角色语气简短回应。直接输出：",
+        ]
+        return variants[attempt % len(variants)]
+    
+    def _clean_response(self, raw: str) -> str:
+        """清洗LLM原始输出"""
+        if not raw:
+            return ""
+        
+        # 移除think标记和其内容
+        raw = re.sub(r'<[^>]*think[^>]*>[\s\S]*?</[^>]*think[^>]*>', '', raw, flags=re.IGNORECASE)
+        raw = re.sub(r'<think>[\s\S]*?</think>', '', raw, flags=re.IGNORECASE)
+        raw = re.sub(r'\[think\][\s\S]*?\[/think\]', '', raw, flags=re.IGNORECASE)
+        
+        # 移除可能的思考标记残留
+        raw = re.sub(r'^[\s\n]*(思考|分析|理解|我认为)[\s：:]*', '', raw)
+        
+        # 移除角色前缀标签
+        raw = re.sub(r'^(p\d+|n\d+|角色)[\s：:]*', '', raw, flags=re.IGNORECASE)
+        
+        # 移除"输出："、"回答："等前缀
+        raw = re.sub(r'^(输出|回答|回复|Response)[\s：:]*', '', raw, flags=re.IGNORECASE)
+        
+        return raw.strip()
+    
+    def _is_valid_response(self, response: str) -> bool:
+        """判断回复是否有效"""
+        if not response or len(response.strip()) < 2:
+            return False
+        
+        # 太长也不行（可能是包含了prompt）
+        if len(response) > 200:
+            return False
+        
+        # 不能是纯特殊字符
+        stripped = response.strip('。！？、，：；「」（）《》【】"\'')
+        if not stripped or len(stripped) < 2:
+            return False
+        
+        # 不能是JSON
+        if response.strip().startswith('{') and response.strip().endswith('}'):
+            return False
+        
+        return True
+    
+    def _template_fallback(self, speaker) -> str:
+        """模板fallback（完全无法使用LLM时）"""
+        # 根据性格选择不同风格的回复
+        personality = getattr(speaker, 'personality', '')
+        
+        if '沉稳' in personality or '内敛' in personality:
+            fallbacks = ["点头不语。", "道友请讲。", "嗯。", "善。"]
+        elif '豪迈' in personality or '洒脱' in personality:
+            fallbacks = ["哈哈哈！", "道友爽快！", "正合我意！", "好说好说！"]
+        elif '温婉' in personality or '聪慧' in personality:
+            fallbacks = ["道友所言极是。", "愿闻其详。", "承蒙指点。", "是极是极。"]
+        elif '阴狠' in personality or '果决' in personality:
+            fallbacks = ["哼。", "知道了。", "不必多言。", "动手便是。"]
+        else:
+            fallbacks = self.TEMPLATE_RESPONSES
+        
+        return random.choice(fallbacks)
+
+
+# ============ 对话管理器 ============
+
+class DialogueGenerator:
+    """对话管理器（整合模板 + LLM）"""
+    
+    GREETING_TEMPLATES = [
+        "在下{name}，幸会幸会。",
+        "道友有礼了。",
+        "原来是道友，当真有缘。",
+        "今日得见道友，实乃幸事。",
+    ]
+    
+    def __init__(self, llm_client=None):
+        self.llm_client = llm_client
+        self.llm_gen = LLMDialogueGenerator(llm_client)
+    
+    def should_initiate_dialogue(self, agent, other, context: str) -> bool:
+        """判断是否应该发起对话"""
+        import random
+        
+        # 基于关系决定是否互动
+        rel = agent.get_relationship_with(other.id)
+        level = rel.get('level', 0)
+        
+        # 关系太差不主动
+        if level < -20:
+            return False
+        
+        # 关系好大概率互动
+        if level > 50:
             return random.random() < 0.8
         
-        # 默认50%
-        return random.random() < 0.5
+        # 陌生人小概率互动
+        if level == 0:
+            return random.random() < 0.2
+        
+        return random.random() < 0.4
     
-    def generate_greeting(self, agent, other_agent) -> str:
+    def generate_greeting(self, agent, other) -> str:
         """生成问候语"""
-        templates = self.GREETING_TEMPLATES
-        template = random.choice(templates)
-        return template.format(speaker=agent.name)
+        template = random.choice(self.GREETING_TEMPLATES)
+        return template.format(name=agent.name)
     
-    def select_topic(self, agent, other_agent, context: dict) -> str:
+    def select_topic(self, agent, other, context: dict) -> str:
         """选择话题"""
-        topics = []
-        
-        # 修为话题（通用）
-        if random.random() < 0.4:
-            topics.extend(self.CULTIVATION_TOPICS)
-        
-        # 宗门话题（不同宗门）
-        if agent.sect != other_agent.sect:
-            topic = random.choice(self.SECT_TOPICS)
-            topic = topic.format(
-                other_sect=other_agent.sect,
-                self_sect=agent.sect
-            )
-            topics.append(topic)
-        
-        # 从记忆中提取话题
-        recent_interactions = []
-        if hasattr(agent, 'memory') and agent.memory:
-            recent_interactions = agent.memory.get_events_with_person(
-                other_agent.id,
-                agent.world.time.day if hasattr(agent, 'world') else 1,
-                n=2
-            )
-        if recent_interactions:
-            topics.append(f"上次与道友谈及{recent_interactions[0].content[:15]}...")
-        
-        return random.choice(topics) if topics else "今日天气甚好，道友可有兴致论道一番？"
-    
-    def generate_response(self, agent, other_agent, their_line: str, 
-                         context: dict) -> str:
-        """生成对其他角色台词的回应"""
-        
-        if self.llm_client:
-            return self._generate_with_llm(
-                agent, other_agent, their_line, context
-            )
-        else:
-            return self._fallback_response(agent, other_agent, their_line)
-    
-    def _fallback_response(self, agent, other_agent, their_line: str) -> str:
-        """使用模板生成回应"""
-        responses = [
-            "道友所言甚是。",
-            "嗯，此言有理。",
-            "愿闻其详。",
-            "确实如此，修仙界波诡云谲。",
-            "道友好见识。",
+        topics = [
+            "今日天气甚好，道友可有兴致论道一番？",
+            "不知道友对近日修仙界的局势有何看法？",
+            "修行路上，道友可有困惑？",
+            "听闻附近有秘境现世，不知是真是假？",
+            "你我同在一宗，当多多走动才是。",
         ]
-        return random.choice(responses)
+        return random.choice(topics)
     
-    def _generate_with_llm(self, agent, other_agent, their_line: str,
-                          context: dict) -> str:
-        """使用LLM生成更自然的对话"""
+    def generate_response(self, speaker, listener, last_line: str,
+                          context: dict, max_retries: int = 2) -> str:
+        """生成角色对对话中对方上一句话的回应"""
+        # 构建上下文描述
+        context_str = f"{listener.name}说：「{last_line}」"
         
-        prompt = f"""场景：{context.get('location_name', '某地')}
-角色A：{agent.name}（{agent.sect}弟子，修为{agent.cultivation}）
-角色B：{other_agent.name}（{other_agent.sect}弟子，修为{other_agent.cultivation}）
-性格A：{agent.personality}
-
-角色B刚才说：「{their_line}」
-
-请以角色A的身份，生成角色A的回应。要符合角色性格，自然流畅。
-回应应控制在20字以内。
-
-回应："""
-        
-        response = self.llm_client.generate(prompt, max_tokens=100)
-        return response.strip()
+        return self.llm_gen.generate_response(
+            speaker, listener, context_str, max_retries=max_retries
+        )
     
     def generate_dialogue(self, agent, other_agent, context: dict,
-                        max_turns: int = 3) -> Dialogue:
-        """
-        生成一段完整对话
-        
-        Args:
-            agent: 角色A
-            other_agent: 角色B  
-            context: 对话上下文（地点、时间等）
-            max_turns: 最大轮次
-        
-        Returns:
-            Dialogue对象
-        """
+                          max_turns: int = 3) -> Dialogue:
+        """生成一段完整对话"""
         dialogue = Dialogue(
             participants=[agent.id, other_agent.id],
             topic="初次相遇"
@@ -211,7 +258,7 @@ class DialogueGenerator:
         topic = self.select_topic(agent, other_agent, context)
         dialogue.add_line(DialogueLine(agent.id, topic))
         
-        # 后续轮次：简单对话
+        # 后续轮次：LLM驱动对话
         turns = 0
         current_speaker = other_agent.id
         agent_a = agent
@@ -239,34 +286,18 @@ class DialogueGenerator:
         return dialogue
     
     def generate_dialogue_summary(self, dialogue: Dialogue, 
-                                 for_agent_id: str) -> str:
-        """
-        为特定角色生成对话摘要
-        （从该角色视角的对话理解）
-        """
+                                  for_agent_id: str) -> str:
+        """为特定角色生成对话摘要"""
         if not dialogue.lines:
             return "无对话"
         
-        lines_from_agent = [
-            line for line in dialogue.lines
-            if line.speaker == for_agent_id
-        ]
-        
         other_lines = [
             line for line in dialogue.lines
-            if line.speaker != for_agent_id
+            if line.speaker_id != for_agent_id
         ]
         
         if not other_lines:
             return "今日未曾与人交谈。"
         
-        other_name = dialogue.participants[1] if dialogue.participants[0] == for_agent_id \
-                     else dialogue.participants[0]
-        
-        summary_parts = [f"与{other_name}交谈："]
-        
-        # 提取关键信息
         key_points = [line.content[:30] for line in other_lines[:2]]
-        summary_parts.extend([f"- {p}..." for p in key_points])
-        
-        return "\n".join(summary_parts)
+        return "与道友交谈：" + "；".join(key_points)
