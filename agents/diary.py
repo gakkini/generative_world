@@ -166,7 +166,11 @@ class DiaryWriter:
 【近七日反思】
 {reflection_desc if reflection_desc else '暂无反思'}"""
         
-        system_prompt = _get_diary_system_prompt(agent)
+        # 优先使用 agent.system_prompt，其次基于world_type生成
+        if hasattr(agent, 'system_prompt') and agent.system_prompt:
+            system_prompt = agent.system_prompt
+        else:
+            system_prompt = _get_diary_system_prompt(agent)
         
         prompt = f"""{context_block}
 

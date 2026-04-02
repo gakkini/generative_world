@@ -80,11 +80,17 @@ class PlanGenerator:
         """通过LLM生成计划"""
         prompt = self._build_plan_prompt(agent, world_state)
         
-        # 优先使用角色配置中的 system_prompt，否则使用默认
+        # 优先使用角色配置中的 system_prompt
         if hasattr(agent, 'system_prompt') and agent.system_prompt:
-            system_prompt = agent.system_prompt + "\n\n你是一个行为规划专家。请严格按照输出格式生成计划。"
+            # agent的system_prompt已经是完整的角色设定，直接用它
+            system_prompt = agent.system_prompt
         else:
-            system_prompt = "你是一个修仙世界的行为规划专家。请严格按照输出格式生成计划。"
+            # 无system_prompt时使用基于world_type的默认
+            world_type = world_state.get('world_type', 'cultivation')
+            if world_type == 'modern_urban':
+                system_prompt = f"你是{agent.name}，职业是{getattr(agent, 'occupation', '未知')}，性格{getattr(agent, 'personality', '')}。"
+            else:
+                system_prompt = f"你是{agent.name}，{agent.sect}弟子，性格{getattr(agent, 'personality', '')}。"
         
         response = self.llm_client.generate(
             prompt,
@@ -110,57 +116,55 @@ class PlanGenerator:
         
         relationships = self._get_relationship_summary(agent)
         
-        # 根据世界类型选择动作模板
+        # 根据世界类型构建场景背景
         world_type = world_state.get('world_type', 'cultivation')
         occupation = getattr(agent, 'occupation', '')
         
         if world_type == 'modern_urban':
-            # 现代都市动作模板
-            action_templates = f"""现代都市家中：阅读研究、工作学习、使用电子设备、休息放松、与家人/伴侣互动、做家务、观看窗外风景、听音乐、喝咖啡
-现代都市户外：外出散步、购物、健身、与朋友聚会、餐厅用餐、观看电影"""
-            world_style_hint = "现代都市日常生活特色"
-            role_intro = f"你是{agent.name}，职业是{occupation}（现代都市）。"
+            world_desc = "现代都市世界"
+            location_desc = f"当前位置：{location_name}，这是你的家"
         else:
-            # 修仙世界动作模板
-            action_templates = """宗门内：修炼、拜访师父、与师兄弟切磋、参加讲座、采集灵草
-中立区：探索、与当地人交易、打探消息、客栈休息
-危险区：调查危险区域、与敌人战斗、潜行探索"""
-            world_style_hint = "修仙世界特色"
-            role_intro = f"你是{agent.name}（{agent.sect} {agent.cultivation}）。"
+            world_desc = "修仙世界"
+            location_desc = f"当前位置：{location_name}（{agent.sect}）"
         
-        return f"""{role_intro}
+        # 构建自主决策的prompt - 不提供选项，让LLM自己思考
+        return f"""【世界观】
+{world_desc}
 
-【角色基本信息】
+【角色】
+你是{agent.name}。
+- 职业/身份：{occupation if world_type == 'modern_urban' else f'{agent.sect}弟子，{agent.cultivation}'}
 - 性格：{agent.personality}
 - 目标：{', '.join(agent.goals) if agent.goals else '无'}
-- 当前位置：{location_name}（{location_type}）
 
-【当前时间】
-{world_state.get('time_str', f'第{world_state.get("day", 1)}日')}
+【当前状态】
+{location_desc}
+时间：{world_state.get('time_str', f'第{world_state.get("day", 1)}日')}
 
 【近三日经历】
 {recent_str}
 
-【当前人际关系】
+【人际关系】
 {relationships}
 
-【可选动作类型】（根据位置和性格选择1-3个）
-{action_templates}
+【任务】
+作为这个角色，基于上述信息，自主决定今天要做什么。
+不要从预设列表中选择，要真正思考：这个角色在这种状态下，最可能做什么？
 
-请制定今日计划，严格按以下JSON格式输出（不要有其他内容）：
+请以JSON格式输出你的计划：
 {{
-  "goal": "计划目标一句话描述",
+  "goal": "一句话描述今天的核心目标",
   "actions": [
-    {{"name": "动作名", "description": "动作详细描述", "duration": 1}},
-    ...
+    {{"name": "动作名称（用中文）", "description": "具体做什么，50字以内描述", "duration": 1}},
+    {{"name": "第二个动作", "description": "描述", "duration": 1}}
   ]
 }}
 
 要求：
 1. 动作数量1-3个
-2. 必须符合角色性格和当前位置
-3. 动作描述要有{world_style_hint}
-4. JSON外不要有多余文字（只需输出JSON）
+2. 动作要真正体现角色自主决策，不是从列表选择
+3. 符合角色性格和当前处境
+4. JSON外不要有任何文字
         """
         
     def _get_relationship_summary(self, agent) -> str:
