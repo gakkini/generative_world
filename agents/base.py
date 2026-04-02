@@ -274,8 +274,13 @@ class Agent:
 
     def get_perception_narrative(self) -> str:
         """获取感知叙述"""
+        # 获取LLM客户端用于感知叙述生成
+        llm_client = None
+        if hasattr(self, 'planner') and hasattr(self.planner, 'llm_client'):
+            llm_client = self.planner.llm_client
+        
         return self.perception.generate_perception_narrative(
-            self, self.today_perceptions
+            self, self.today_perceptions, llm_client=llm_client
         )
 
     # ==================== 对话模块 ====================

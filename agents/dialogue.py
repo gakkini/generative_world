@@ -75,11 +75,15 @@ class LLMDialogueGenerator:
         
         prompt = self._build_dialogue_prompt(speaker, listener, context)
         
-        # 优先使用角色配置中的 system_prompt，否则使用默认修仙风格
+        # 优先使用角色配置中的 system_prompt，否则使用基于world_type的默认
         if hasattr(speaker, 'system_prompt') and speaker.system_prompt:
             system_prompt = speaker.system_prompt
         else:
-            system_prompt = f"你是{speaker.name}，{speaker.sect}弟子，修为{speaker.cultivation}，性格{speaker.personality}。你正在与他人对话。请用一句简短的{getattr(speaker, 'sect', '修仙')}风格的话回应。"
+            world_type = getattr(speaker, 'world_type', 'cultivation')
+            if world_type == 'modern_urban':
+                system_prompt = f"你是{speaker.name}，职业是{getattr(speaker, 'occupation', '未知')}，性格{speaker.personality}。你正在与他人对话。请用一句简短自然的话回应。"
+            else:
+                system_prompt = f"你是{speaker.name}，{speaker.sect}弟子，修为{speaker.cultivation}，性格{speaker.personality}。你正在与他人对话。请用一句简短的修仙风格的话回应。"
         
         for attempt in range(max_retries + 1):
             raw = self.llm_client.generate(
@@ -189,11 +193,34 @@ class LLMDialogueGenerator:
 class DialogueGenerator:
     """对话管理器（整合模板 + LLM）"""
     
-    GREETING_TEMPLATES = [
+    CULTIVATION_GREETINGS = [
         "在下{name}，幸会幸会。",
         "道友有礼了。",
         "原来是道友，当真有缘。",
         "今日得见道友，实乃幸事。",
+    ]
+    
+    MODERN_GREETINGS = [
+        "你好呀！",
+        "嗨，你也在家呀？",
+        "嘿，今天怎么样？",
+        "哈喽！",
+    ]
+    
+    CULTIVATION_TOPICS = [
+        "今日天气甚好，道友可有兴致论道一番？",
+        "不知道友对近日修仙界的局势有何看法？",
+        "修行路上，道友可有困惑？",
+        "听闻附近有秘境现世，不知是真是假？",
+        "你我同在一宗，当多多走动才是。",
+    ]
+    
+    MODERN_TOPICS = [
+        "今天想聊点什么？",
+        "工作/学习还顺利吗？",
+        "有什么新鲜事想分享吗？",
+        "要不要一起做点什么？",
+        "最近有什么好看的剧/书推荐吗？",
     ]
     
     def __init__(self, llm_client=None):
@@ -224,18 +251,21 @@ class DialogueGenerator:
     
     def generate_greeting(self, agent, other) -> str:
         """生成问候语"""
-        template = random.choice(self.GREETING_TEMPLATES)
+        world_type = getattr(agent, 'world_type', 'cultivation')
+        if world_type == 'modern_urban':
+            greetings = self.MODERN_GREETINGS
+        else:
+            greetings = self.CULTIVATION_GREETINGS
+        template = random.choice(greetings)
         return template.format(name=agent.name)
     
     def select_topic(self, agent, other, context: dict) -> str:
         """选择话题"""
-        topics = [
-            "今日天气甚好，道友可有兴致论道一番？",
-            "不知道友对近日修仙界的局势有何看法？",
-            "修行路上，道友可有困惑？",
-            "听闻附近有秘境现世，不知是真是假？",
-            "你我同在一宗，当多多走动才是。",
-        ]
+        world_type = getattr(agent, 'world_type', 'cultivation')
+        if world_type == 'modern_urban':
+            topics = self.MODERN_TOPICS
+        else:
+            topics = self.CULTIVATION_TOPICS
         return random.choice(topics)
     
     def generate_response(self, speaker, listener, last_line: str,

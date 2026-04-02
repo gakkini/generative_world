@@ -254,23 +254,91 @@ class PerceptionSystem:
         # 限制感知数量（认知负荷）
         return perceptions[:5]
     
-    def generate_perception_narrative(self, agent, perceptions: list) -> str:
-        """生成感知叙述"""
+    def generate_perception_narrative(self, agent, perceptions: list, llm_client=None) -> str:
+        """生成感知叙述 - 使用LLM根据角色设定生成个性化描述"""
+        
         if not perceptions:
             return "今日似乎无事发生"
         
-        lines = ["今日所见所闻："]
-        
-        for i, p in enumerate(perceptions, 1):
+        # 构建感知列表
+        perception_items = []
+        for p in perceptions:
             if p.type == self.TYPE_CHARACTER:
-                lines.append(f"  {i}. 偶遇{p.source}")
+                perception_items.append(f"- 看到其他角色：{p.source}")
             elif p.type == self.TYPE_EVENT:
-                lines.append(f"  {i}. {p.content}")
+                perception_items.append(f"- {p.content}")
             elif p.type == self.TYPE_DANGER:
-                lines.append(f"  {i}. ⚠️ {p.content}")
+                perception_items.append(f"- ⚠️ {p.content}")
             elif p.type == self.TYPE_OPPORTUNITY:
-                lines.append(f"  {i}. ✨ {p.content}")
+                perception_items.append(f"- ✨ {p.content}")
             elif p.type == self.TYPE_MEMORY_TRIGGER:
-                lines.append(f"  {i}. 💭 {p.content}")
+                perception_items.append(f"- 💭 {p.content}")
+        
+        perception_str = "\n".join(perception_items)
+        
+        # 如果有LLM客户端，使用LLM生成个性化描述
+        if llm_client:
+            world_type = getattr(agent, 'world_type', 'cultivation')
+            
+            if world_type == 'modern_urban':
+                system_prompt = f"""你是{agent.name}，职业是{getattr(agent, 'occupation', '未知')}，性格{getattr(agent, 'personality', '')}。
+你是一个观察记录专家。请根据以下感知内容，用符合角色职业和性格的方式，描述今天观察到了什么。
+要求：自然流畅，符合现代都市生活，字数50字以内。"""
+                user_prompt = f"""感知内容：
+{perception_str}
+
+请描述你今天观察/感知到的事物："""
+            else:
+                system_prompt = f"""你是{agent.name}，{getattr(agent, 'sect', '某')}弟子，性格{getattr(agent, 'personality', '')}。
+你是一个修仙世界观察记录专家。请根据以下感知内容，用符合修仙世界的方式描述今天观察到了什么。
+要求：融入修仙元素，自然流畅，50字以内。"""
+                user_prompt = f"""感知内容：
+{perception_str}
+
+请描述你今日所察："""
+            
+            try:
+                result = llm_client.generate(
+                    user_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=200,
+                    temperature=0.8
+                )
+                import re
+                result = re.sub(r'<think>[\s\S]*?</think>', '', result, flags=re.IGNORECASE).strip()
+                if result and len(result) > 10:
+                    return f"今日所见所闻：\n{result}"
+            except Exception:
+                pass  # fallback to template
+        
+        # Fallback: 使用模板生成
+        world_type = getattr(agent, 'world_type', 'cultivation')
+        
+        if world_type == 'modern_urban':
+            lines = ["今日所见所闻："]
+            for i, p in enumerate(perceptions, 1):
+                if p.type == self.TYPE_CHARACTER:
+                    lines.append(f"  {i}. 看到有人在附近")
+                elif p.type == self.TYPE_EVENT:
+                    lines.append(f"  {i}. {p.content}")
+                elif p.type == self.TYPE_DANGER:
+                    lines.append(f"  {i}. ⚠️ {p.content}")
+                elif p.type == self.TYPE_OPPORTUNITY:
+                    lines.append(f"  {i}. ✨ {p.content}")
+                elif p.type == self.TYPE_MEMORY_TRIGGER:
+                    lines.append(f"  {i}. 💭 {p.content}")
+        else:
+            lines = ["今日所见所闻："]
+            for i, p in enumerate(perceptions, 1):
+                if p.type == self.TYPE_CHARACTER:
+                    lines.append(f"  {i}. 偶遇{p.source}")
+                elif p.type == self.TYPE_EVENT:
+                    lines.append(f"  {i}. {p.content}")
+                elif p.type == self.TYPE_DANGER:
+                    lines.append(f"  {i}. ⚠️ {p.content}")
+                elif p.type == self.TYPE_OPPORTUNITY:
+                    lines.append(f"  {i}. ✨ {p.content}")
+                elif p.type == self.TYPE_MEMORY_TRIGGER:
+                    lines.append(f"  {i}. 💭 {p.content}")
         
         return "\n".join(lines)

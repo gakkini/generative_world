@@ -110,7 +110,25 @@ class PlanGenerator:
         
         relationships = self._get_relationship_summary(agent)
         
-        return f"""你是{agent.name}（{agent.sect} {agent.cultivation}）。
+        # 根据世界类型选择动作模板
+        world_type = world_state.get('world_type', 'cultivation')
+        occupation = getattr(agent, 'occupation', '')
+        
+        if world_type == 'modern_urban':
+            # 现代都市动作模板
+            action_templates = f"""现代都市家中：阅读研究、工作学习、使用电子设备、休息放松、与家人/伴侣互动、做家务、观看窗外风景、听音乐、喝咖啡
+现代都市户外：外出散步、购物、健身、与朋友聚会、餐厅用餐、观看电影"""
+            world_style_hint = "现代都市日常生活特色"
+            role_intro = f"你是{agent.name}，职业是{occupation}（现代都市）。"
+        else:
+            # 修仙世界动作模板
+            action_templates = """宗门内：修炼、拜访师父、与师兄弟切磋、参加讲座、采集灵草
+中立区：探索、与当地人交易、打探消息、客栈休息
+危险区：调查危险区域、与敌人战斗、潜行探索"""
+            world_style_hint = "修仙世界特色"
+            role_intro = f"你是{agent.name}（{agent.sect} {agent.cultivation}）。"
+        
+        return f"""{role_intro}
 
 【角色基本信息】
 - 性格：{agent.personality}
@@ -127,9 +145,7 @@ class PlanGenerator:
 {relationships}
 
 【可选动作类型】（根据位置和性格选择1-3个）
-宗门内：修炼、拜访师父、与师兄弟切磋、参加讲座、采集灵草
-中立区：探索、与当地人交易、打探消息、客栈休息
-危险区：调查危险区域、与敌人战斗、潜行探索
+{action_templates}
 
 请制定今日计划，严格按以下JSON格式输出（不要有其他内容）：
 {{
@@ -143,7 +159,7 @@ class PlanGenerator:
 要求：
 1. 动作数量1-3个
 2. 必须符合角色性格和当前位置
-3. 动作描述要有修仙世界特色
+3. 动作描述要有{world_style_hint}
 4. JSON外不要有多余文字（只需输出JSON）
         """
         
