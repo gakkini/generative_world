@@ -119,8 +119,16 @@ class DiaryWriter:
         
         # 对话摘要
         dialogues = ctx.get('today_dialogues', [])
-        dialogue_desc = "\n".join([f"- 与{d.get('participants', '某人')}交流：{d.get('summary', '')[:50]}"
-                                   for d in dialogues[:3]]) if dialogues else '今日未与人交谈'
+        dialogue_descs = []
+        for d in dialogues[:3]:
+            if hasattr(d, 'participants') and hasattr(d, 'get_summary'):
+                # Dialogue object
+                participants = ', '.join(d.participants) if d.participants else '某人'
+                summary = d.get_summary()[:50] if d.get_summary() else ''
+                dialogue_descs.append(f"- 与{participants}交流：{summary}")
+            elif isinstance(d, dict):
+                dialogue_descs.append(f"- 与{d.get('participants', '某人')}交流：{d.get('summary', '')[:50]}")
+        dialogue_desc = "\n".join(dialogue_descs) if dialogue_descs else '今日未与人交谈'
         
         # 反思
         reflections = ctx.get('recent_reflections', [])
