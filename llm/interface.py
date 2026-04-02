@@ -1,18 +1,20 @@
 """
-LLM接口封装 - 支持OpenAI兼容格式 + MiniMax
+LLM接口封装 - OpenAI兼容格式 + MiniMax
+统一管理所有LLM调用，所有客户端通过本模块访问
 """
 import os
+import re
 import json
-from typing import Optional, List, Dict, Any
+from typing import Optional
 
 
 class LLMInterface:
-    """LLM生成接口"""
+    """LLM生成接口（统一封装，兼容旧代码）"""
     
     def __init__(self, client=None):
         self.client = client
     
-    def generate(self, prompt: str, system_prompt: str = None, 
+    def generate(self, prompt: str, system_prompt: str = None,
                 max_tokens: int = 1000, temperature: float = 0.8,
                 **kwargs) -> str:
         """统一生成接口"""
@@ -26,12 +28,29 @@ class LLMInterface:
         return "[LLM未配置]"
 
 
+def _expand_env_var(value: str) -> str:
+    """展开字符串中的 ${VAR} 环境变量占位符"""
+    if not isinstance(value, str):
+        return value
+    # 匹配 ${VAR} 格式
+    pattern = r'\$\{([^}]+)\}'
+    matches = re.findall(pattern, value)
+    for var_name in matches:
+        env_value = os.environ.get(var_name, '')
+        if env_value:
+            value = value.replace(f'${{{var_name}}}', env_value)
+        else:
+            # 如果环境变量不存在，保留原样（让后续检查失败）
+            pass
+    return value
+
+
 class BaseLLMClient:
     """LLM客户端基类"""
     
     def generate(self, prompt: str, system_prompt: str = None,
-                max_tokens: int = 1000, temperature: float = 0.8,
-                **kwargs) -> str:
+                 max_tokens: int = 1000, temperature: float = 0.8,
+                 **kwargs) -> str:
         raise NotImplementedError
 
 
@@ -45,13 +64,13 @@ class OpenAICompatibleClient(BaseLLMClient):
                  model: str = "gpt-4", max_retries: int = 3):
         """
         Args:
-            api_key: API密钥
-            base_url: API基础URL（如 "https://api.minimaxi.com/anthropic"）
+            api_key: API密钥（支持 ${ENV_VAR} 格式的环境变量占位符）
+            base_url: API基础URL
             model: 模型名称
             max_retries: 最大重试次数
         """
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
-        self.base_url = base_url or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        self.api_key = _expand_env_var(api_key) if api_key else None
+        self.base_url = (base_url or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")).rstrip("/")
         self.model = model
         self.max_retries = max_retries
     
@@ -61,7 +80,9 @@ class OpenAICompatibleClient(BaseLLMClient):
         """调用LLM生成"""
         import urllib.request
         import urllib.error
-        import re
+        
+        if not self.api_key:
+            return "[Error] API key not configured"
         
         # 构建消息
         messages = []
@@ -119,19 +140,28 @@ class MiniMaxClient(OpenAICompatibleClient):
     """
     
     def __init__(self, api_key: str = None, model: str = "MiniMax-M2.7"):
+        # 先展开环境变量，再传给父类
+        expanded_key = _expand_env_var(api_key) if api_key else None
         super().__init__(
-            api_key=api_key,
+            api_key=expanded_key,
             base_url="https://api.minimaxi.com/v1",
             model=model
         )
     
     @classmethod
     def from_config(cls, config: dict = None):
-        """从配置创建"""
+        """从配置创建（自动展开环境变量占位符）"""
         if config is None:
             config = {}
         
-        api_key = config.get("api_key") or os.environ.get("MINIMAX_API_KEY")
+        raw_key = config.get("api_key", "")
+        # 展开 ${VAR} 格式的占位符
+        api_key = _expand_env_var(raw_key) if raw_key else None
+        
+        # 如果展开后为空，尝试从环境变量获取
+        if not api_key:
+            api_key = os.environ.get("MINIMAX_API_KEY")
+        
         model = config.get("model", "MiniMax-M2.7")
         
         if not api_key:
@@ -196,7 +226,7 @@ def create_llm_client(client_type: str = "auto", config: dict = None) -> Optiona
             - "openai": OpenAI官方API  
             - "ollama": 本地Ollama
             - "auto": 自动检测
-        config: 配置字典
+        config: 配置字典（支持 ${ENV_VAR} 格式的环境变量占位符）
         
     Returns:
         LLM客户端实例
@@ -210,7 +240,8 @@ def create_llm_client(client_type: str = "auto", config: dict = None) -> Optiona
         return OllamaClient(model=model, base_url=base_url)
     
     elif client_type == "openai":
-        api_key = config.get("api_key") if config else None
+        raw_key = config.get("api_key", "") if config else ""
+        api_key = _expand_env_var(raw_key) if raw_key else None
         base_url = config.get("base_url") if config else None
         model = config.get("model", "gpt-4") if config else "gpt-4"
         return OpenAICompatibleClient(api_key=api_key, base_url=base_url, model=model)
