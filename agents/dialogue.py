@@ -75,10 +75,16 @@ class LLMDialogueGenerator:
         
         prompt = self._build_dialogue_prompt(speaker, listener, context)
         
+        # 优先使用角色配置中的 system_prompt，否则使用默认修仙风格
+        if hasattr(speaker, 'system_prompt') and speaker.system_prompt:
+            system_prompt = speaker.system_prompt
+        else:
+            system_prompt = f"你是{speaker.name}，{speaker.sect}弟子，修为{speaker.cultivation}，性格{speaker.personality}。你正在与他人对话。请用一句简短的{getattr(speaker, 'sect', '修仙')}风格的话回应。"
+        
         for attempt in range(max_retries + 1):
             raw = self.llm_client.generate(
                 prompt,
-                system_prompt=f"你是{speaker.name}，{speaker.sect}弟子，修为{speaker.cultivation}，性格{speaker.personality}。你正在与他人对话。请用一句简短的修仙风格的话回应。",
+                system_prompt=system_prompt,
                 max_tokens=300,
                 temperature=0.85
             )

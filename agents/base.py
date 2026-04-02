@@ -39,6 +39,7 @@ class Agent:
         self.personality = config.get('personality', '')
         self.background = config.get('background', '')
         self.role = config.get('role', 'npc')
+        self.system_prompt = config.get('system_prompt', '')  # MBTI/角色设定 prompt
 
         # 目标与关系
         self.goals = config.get('goals', [])

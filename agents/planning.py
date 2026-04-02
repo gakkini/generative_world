@@ -80,9 +80,15 @@ class PlanGenerator:
         """通过LLM生成计划"""
         prompt = self._build_plan_prompt(agent, world_state)
         
+        # 优先使用角色配置中的 system_prompt，否则使用默认
+        if hasattr(agent, 'system_prompt') and agent.system_prompt:
+            system_prompt = agent.system_prompt + "\n\n你是一个行为规划专家。请严格按照输出格式生成计划。"
+        else:
+            system_prompt = "你是一个修仙世界的行为规划专家。请严格按照输出格式生成计划。"
+        
         response = self.llm_client.generate(
             prompt,
-            system_prompt="你是一个修仙世界的行为规划专家。请严格按照输出格式生成计划。",
+            system_prompt=system_prompt,
             max_tokens=1500,
             temperature=0.8
         )
