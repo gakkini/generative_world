@@ -100,5 +100,7 @@ class World:
             'day': self.time.day,
             'time_str': self.time.get_full_time_str(),
             'positions': self.positions.copy(),
-            'locations': self.locations
+            'locations': self.locations,
+            'world_type': self.config.get('world', {}).get('type', 'default'),
+            'world_name': self.config.get('world', {}).get('name', '未知世界'),
         }

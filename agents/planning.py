@@ -170,12 +170,19 @@ class PlanGenerator:
         import json
         import re
         
+        # 去除 markdown 代码块包裹
+        clean_response = response.strip()
+        if clean_response.startswith('```'):
+            # 去掉 ```json 或 ``` 和结尾的 ```
+            clean_response = re.sub(r'^```(?:json)?\s*', '', clean_response, flags=re.IGNORECASE)
+            clean_response = re.sub(r'\s*```$', '', clean_response)
+        
         # 尝试提取JSON块
-        json_match = re.search(r'\{[\s\S]*\}', response)
+        json_match = re.search(r'\{[\s\S]*\}', clean_response)
         if not json_match:
             # Fallback: 尝试直接解析
             try:
-                data = json.loads(response.strip())
+                data = json.loads(clean_response.strip())
             except Exception:
                 # 最后一次尝试：提取所有"动作"相关行
                 return self._fallback_parse(response, agent)
